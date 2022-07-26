@@ -1,0 +1,10 @@
+build/
+dist/
+tmp/
+python_bindings/tests/__pycache__/
+*.pyd
+var/
+.vscode/
+cmake-variants.yaml
+build-*
+data/
