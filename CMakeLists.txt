@@ -5,9 +5,9 @@ cmake_minimum_required(VERSION 3.19)
 cmake_policy(SET CMP0054 NEW)
 
 project(
-  example_lib
-  HOMEPAGE_URL "https://visual-comptuing.com/"
-  DESCRIPTION "Empty cpp project"
+  faissbench
+  HOMEPAGE_URL "https://visual-computing.com/"
+  DESCRIPTION "Faiss benchmark project"
   VERSION 0.0.1)
 
 # https://cmake.org/cmake/help/latest/prop_tgt/CXX_STANDARD.html
@@ -68,5 +68,14 @@ endif()
 message("C++ compiler flags: ${CMAKE_CXX_FLAGS}")
 message("C++ compiler flags release: ${CMAKE_CXX_FLAGS_RELEASE}")
 
-add_subdirectory(example_lib)
+
+# to support cmake find_dependency
+include(CMakeFindDependencyMacro)
+
+# Include third party libraries provided through vcpkg
+# add_subdirectory(faiss)
+find_package(faiss CONFIG REQUIRED)
+target_link_libraries(compile-options INTERFACE faiss)
+
+# include sub directories
 add_subdirectory(benchmark)

@@ -2,6 +2,17 @@
 
 #include <chrono>
 
+template<typename... Args>
+std::string string_format(const char* fmt, Args... args)
+{
+    size_t size = snprintf(nullptr, 0, fmt, args...);
+    std::string buf;
+    buf.reserve(size + 1);
+    buf.resize(size);
+    snprintf(&buf[0], size + 1, fmt, args...);
+    return buf;
+}
+
 class StopW
 {
     std::chrono::steady_clock::time_point time_begin;
@@ -12,11 +23,18 @@ public:
         time_begin = std::chrono::steady_clock::now();
     }
 
+    long long getElapsedTimeSeconds()
+    {
+        std::chrono::steady_clock::time_point time_end = std::chrono::steady_clock::now();
+        return (std::chrono::duration_cast<std::chrono::seconds>(time_end - time_begin).count());
+    }
+
     long long getElapsedTimeMicro()
     {
         std::chrono::steady_clock::time_point time_end = std::chrono::steady_clock::now();
         return (std::chrono::duration_cast<std::chrono::microseconds>(time_end - time_begin).count());
     }
+
 
     void reset()
     {
@@ -32,6 +50,10 @@ public:
 */
 
 #if defined(_WIN32)
+
+// windows.h will define max/min as macro, disable this function and import limits instead
+#define NOMINMAX 
+#include <limits>
 #include <windows.h>
 #include <psapi.h>
 

@@ -23,4 +23,6 @@ main:
       settings:
         DATA_PATH: ""
         CMAKE_EXPORT_COMPILE_COMMAND: "on"
+        CMAKE_TOOLCHAIN_FILE: "c:/Lang/Cpp/vcpkg/scripts/buildsystems/vcpkg.cmake"
+
 

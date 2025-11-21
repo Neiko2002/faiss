@@ -1,0 +1,8 @@
+{
+  "name": "faissbench",
+  "version-string": "1.0.0",
+  "dependencies": [
+    "faiss"
+  ],
+  "builtin-baseline": "9a7f7340a6c5f11f24c3d59f85e07143feb84e06"
+}
