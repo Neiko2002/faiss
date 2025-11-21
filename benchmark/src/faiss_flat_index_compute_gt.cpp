@@ -12,6 +12,7 @@
 #include <fstream>
 #include <vector>
 #include <unordered_set>
+#include <algorithm>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -45,8 +46,7 @@
 float* fvecs_read(const char* fname, size_t* d_out, size_t* n_out) {
     std::error_code ec{};
     auto file_size = std::filesystem::file_size(fname, ec);
-    if (ec != std::error_code{})
-    {
+    if (ec != std::error_code{}) {
         std::cerr << "error when accessing file " << fname << ", size is: " << file_size << " message: " << ec.message() << std::endl;
         perror("");
         abort();
@@ -121,18 +121,20 @@ int main() {
     // https://github.com/facebookresearch/faiss/wiki/Threads-and-asynchronous-calls
     #ifdef _OPENMP
         omp_set_dynamic(0);     // Explicitly disable dynamic teams
-        omp_set_num_threads(1); // Use 1 threads for all consecutive parallel regions
+        omp_set_num_threads(4); // Use 1 threads for all consecutive parallel regions
 
         std::cout << "_OPENMP " << omp_get_num_threads() << " threads" << std::endl;
     #endif
 
-    // Sift1M
-    const auto data_path = std::filesystem::path("e:\\Data\\Feature\\SIFT1M\\");
-    const auto repository_file  = (data_path / "SIFT1M" / "sift_base.fvecs").string();
-    const auto query_file       = (data_path / "SIFT1M" / "sift_query.fvecs").string();
-    const auto groundtruth_file = (data_path / "SIFT1M" / "sift_groundtruth_top1024.ivecs").string();
-    size_t k = 1024; // default k
-    size_t bach = 100000; // default batch size
+    // glove
+    const auto data_path = std::filesystem::path("e:\\Data\\Feature\\GloVe\\");
+    const auto repository_file  = (data_path / "glove-100" / "glove-100_base.fvecs").string();
+    const auto query_file       = (data_path / "glove-100" / "glove-100_query.fvecs").string();
+    const auto groundtruth_base = (data_path / "glove-100" / "glove-100_groundtruth").string();
+
+    // default parameters
+    size_t k = 1024;       // top-k
+    size_t step_size = 100000; // how many base vectors to add per step
 
     // faiss index type
     auto index_type = "Flat";
@@ -142,21 +144,20 @@ int main() {
     printf("[%lld s] Actual memory usage: %zu Mb, Max memory usage: %zu Mb\n", stopwatch.getElapsedTimeSeconds(), getCurrentRSS() / 1000000, getPeakRSS() / 1000000);
 
     size_t d;
+    // keep base dataset and its size in scope for the ground-truth loop
+    size_t nb_total;
+    float* xb_full;
     {
         printf("[%lld s] Loading database\n", stopwatch.getElapsedTimeSeconds());
-        size_t nb;
-        float* xb = fvecs_read(repository_file.c_str(), &d, &nb);
+        xb_full = fvecs_read(repository_file.c_str(), &d, &nb_total);
         printf("[%lld s] Actual memory usage: %zu Mb, Max memory usage: %zu Mb after loading data\n", stopwatch.getElapsedTimeSeconds(), getCurrentRSS() / 1000000, getPeakRSS() / 1000000);
 
         printf("[%lld s] Preparing index \"%s\" d=%zu\n", stopwatch.getElapsedTimeSeconds(), index_type, d);
         index = faiss::index_factory((int)d, index_type, faiss::METRIC_L2);
         printf("[%lld s] Actual memory usage: %zu Mb, Max memory usage: %zu Mb after creating the index\n", stopwatch.getElapsedTimeSeconds(), getCurrentRSS() / 1000000, getPeakRSS() / 1000000);
 
-        printf("[%lld s] Indexing database, size %zu*%zu\n", stopwatch.getElapsedTimeSeconds(), nb, d);
-        index->add(nb, xb);
-        printf("[%lld s] Actual memory usage: %zu Mb, Max memory usage: %zu Mb after filling the index\n", stopwatch.getElapsedTimeSeconds(), getCurrentRSS() / 1000000, getPeakRSS() / 1000000);
-
-        delete[] xb;
+        // We will add the base vectors in chunks of step_size later below.
+        // Keep xb_full alive for the whole run.
     }
 
     size_t nq;
@@ -171,25 +172,49 @@ int main() {
 
 
     {
-        printf("[%lld s] Computing ground truth for %zu queries with k=%zu\n", stopwatch.getElapsedTimeSeconds(), nq, k);
-        faiss::idx_t* I = new faiss::idx_t[nq * k];
-        float* D = new float[nq * k];
+        // For each base size step, extend the index and compute ground truth.
+        size_t nb_current = 0;
+        size_t step_idx   = 0;
 
-        index->search(nq, xq, k, D, I);
+        while (nb_current < nb_total) {
+            size_t nb_next = std::min(nb_current + step_size, nb_total);
+            size_t to_add  = nb_next - nb_current;
 
-        // Convert 0-based faiss ids to 1-based ids if needed
-        std::vector<int> gt_ids(nq * k);
-        for (size_t i = 0; i < nq * k; ++i) {
-            gt_ids[i] = static_cast<int>(I[i]) + 0; // +0 if you want 0-based
+            printf("[%lld s] Step %zu: adding base vectors [%zu, %zu) (count=%zu)\n",
+                   stopwatch.getElapsedTimeSeconds(), step_idx, nb_current, nb_next, to_add);
+
+            index->add(to_add, xb_full + nb_current * d);
+
+            printf("[%lld s] Computing ground truth for %zu queries with k=%zu on nb=%zu base vectors\n",
+                   stopwatch.getElapsedTimeSeconds(), nq, k, nb_next);
+
+            faiss::idx_t* I = new faiss::idx_t[nq * k];
+            float* D = new float[nq * k];
+
+            index->search(nq, xq, k, D, I);
+
+            std::vector<int> gt_ids(nq * k);
+            for (size_t i = 0; i < nq * k; ++i) {
+                gt_ids[i] = static_cast<int>(I[i]); // keep 0-based
+            }
+
+            // ground truth filename based on the base name, k and current base size
+            auto gt_filename = groundtruth_base + "_top" + std::to_string(k) +
+                               "_nb" + std::to_string(nb_next) + ".ivecs";
+
+            printf("[%lld s] Writing ground truth to %s\n", stopwatch.getElapsedTimeSeconds(), gt_filename.c_str());
+            ivecs_write(gt_filename.c_str(), (int)k, (int)nq, gt_ids.data());
+
+            delete[] I;
+            delete[] D;
+
+            nb_current = nb_next;
+            ++step_idx;
         }
-
-        printf("[%lld s] Writing ground truth to %s\n", stopwatch.getElapsedTimeSeconds(), groundtruth_file.c_str());
-        ivecs_write(groundtruth_file.c_str(), (int)k, (int)nq, gt_ids.data());
-        delete[] I;
-        delete[] D;
     }
 
     delete[] xq;
+    delete[] xb_full;
     delete index;
     return 0;
 }
