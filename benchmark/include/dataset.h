@@ -12,7 +12,6 @@
 #include <string>
 #include <vector>
 
-
 namespace benchmark
 {
 
@@ -262,10 +261,6 @@ class Dataset
         std::string suffix = half ? "_explore_groundtruth_half_top1000.ivecs" : "_explore_groundtruth_top1000.ivecs";
         return (files_dir_ / (std::string(name_.name()) + suffix)).string();
     }
-    std::string explore_entry_vertex_file() const
-    {
-        return (files_dir_ / (std::string(name_.name()) + "_explore_entry_vertex.ivecs")).string();
-    }
 
     // Load base data with alignment
     LoadedData load_base(bool half = false) const
@@ -305,6 +300,12 @@ class Dataset
     std::vector<std::vector<uint32_t>> load_groundtruth(size_t k, bool use_half_dataset = false) const
     {
         std::string gt_file = use_half_dataset ? query_groundtruth_file_half() : query_groundtruth_file_full();
+        return load_groundtruth_from_file(gt_file, k);
+    }
+
+    std::vector<std::vector<uint32_t>> load_explore_groundtruth(size_t k, bool use_half_dataset = false) const
+    {
+        std::string gt_file = explore_groundtruth_file(use_half_dataset);
         return load_groundtruth_from_file(gt_file, k);
     }
 

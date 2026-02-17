@@ -38,11 +38,18 @@ void run_faiss_test(const Dataset& ds, bool force_test)
 
     log("=== %s Benchmark %s ===\n", method_name.c_str(), ds.name());
 
+    struct Result
+    {
+        float pct;
+        float recall;
+        double time_us;
+    };
+
     // --- Scenario 1: Full Dataset ---
     log("\n--- Scenario 1: Full Dataset ---\n");
     {
         // Varied subset percentages
-        std::vector<float> percentages = {0.75f, 0.95f, 1.0f};
+        std::vector<float> percentages = {0.19f, 0.75f, 0.95f, 1.0f};
 
         // Load Full Base Data
         log("Loading full base data...\n");
@@ -57,6 +64,13 @@ void run_faiss_test(const Dataset& ds, bool force_test)
         size_t k = 100;
         auto ground_truth = ds.load_groundtruth(k, false);  // full GT
 
+        // Load Explore Data
+        size_t k_explore = DatasetInfo::EXPLORE_TOPK;
+        auto explore_queries = ds.load_explore_query();
+        auto explore_gt = ds.load_explore_groundtruth(k_explore, false);  // false = full
+
+        std::vector<Result> test_results;
+        std::vector<Result> explore_results;
         for (float pct : percentages)
         {
             size_t subset_size = (size_t)(base_data.num * pct);
@@ -95,7 +109,42 @@ void run_faiss_test(const Dataset& ds, bool force_test)
                 }
             }
             float recall = (float)correct / (query_data.num * k);
-            log("%3.0f%% \t recall %.5f \t time_us_per_query %6.0fus\n", pct * 100.0f, recall, time_per_query_us);
+            test_results.push_back({pct, recall, time_per_query_us});
+
+            // --- Exploration Test ---
+            StopW sw_explore;
+            std::vector<faiss::idx_t> I_explore(explore_queries.num * k_explore);
+            std::vector<float> D_explore(explore_queries.num * k_explore);
+            index.search(explore_queries.num, explore_queries.data, k_explore, D_explore.data(), I_explore.data());
+            double time_explore_us = sw_explore.getElapsedTimeMicro() / (double)explore_queries.num;
+
+            size_t correct_explore = 0;
+            for (size_t i = 0; i < explore_queries.num; ++i)
+            {
+                const auto& gt_vec = explore_gt[i];
+                for (size_t j = 0; j < k_explore; ++j)
+                {
+                    faiss::idx_t id = I_explore[i * k_explore + j];
+                    if (std::binary_search(gt_vec.begin(), gt_vec.end(), (uint32_t)id))
+                    {
+                        correct_explore++;
+                    }
+                }
+            }
+            float recall_explore = (float)correct_explore / (explore_queries.num * k_explore);
+            explore_results.push_back({pct, recall_explore, time_explore_us});
+        }
+
+        log("\nTest Queries:\n");
+        for (const auto& r : test_results)
+        {
+            log("%3.0f%% \t recall %.5f \t time_us_per_query %6.0fus\n", r.pct * 100.0f, r.recall, r.time_us);
+        }
+
+        log("\nExploration Queries:\n");
+        for (const auto& r : explore_results)
+        {
+            log("%3.0f%% \t recall %.5f \t time_us_per_query %6.0fus\n", r.pct * 100.0f, r.recall, r.time_us);
         }
     }
 
@@ -118,6 +167,13 @@ void run_faiss_test(const Dataset& ds, bool force_test)
         size_t k = 100;
         auto ground_truth = ds.load_groundtruth(k, true);  // half GT
 
+        // Load Explore Data (Half)
+        size_t k_explore = DatasetInfo::EXPLORE_TOPK;
+        auto explore_queries = ds.load_explore_query();
+        auto explore_gt = ds.load_explore_groundtruth(k_explore, true);  // true = half
+
+        std::vector<Result> test_results;
+        std::vector<Result> explore_results;
         for (float pct : percentages)
         {
             size_t subset_size = (size_t)(base_data.num * pct);
@@ -147,7 +203,43 @@ void run_faiss_test(const Dataset& ds, bool force_test)
                 }
             }
             float recall = (float)correct / (query_data.num * k);
-            log("%3.0f%% \t recall %.5f \t time_us_per_query %6.0fus\n", pct * 100.0f, recall, time_per_query_us);
+            test_results.push_back({pct, recall, time_per_query_us});
+
+            // --- Exploration Test ---
+            StopW sw_explore;
+            std::vector<faiss::idx_t> I_explore(explore_queries.num * k_explore);
+            std::vector<float> D_explore(explore_queries.num * k_explore);
+
+            index.search(explore_queries.num, explore_queries.data, k_explore, D_explore.data(), I_explore.data());
+            double time_explore_us = sw_explore.getElapsedTimeMicro() / (double)explore_queries.num;
+
+            size_t correct_explore = 0;
+            for (size_t i = 0; i < explore_queries.num; ++i)
+            {
+                const auto& gt_vec = explore_gt[i];
+                for (size_t j = 0; j < k_explore; ++j)
+                {
+                    faiss::idx_t id = I_explore[i * k_explore + j];
+                    if (std::binary_search(gt_vec.begin(), gt_vec.end(), (uint32_t)id))
+                    {
+                        correct_explore++;
+                    }
+                }
+            }
+            float recall_explore = (float)correct_explore / (explore_queries.num * k_explore);
+            explore_results.push_back({pct, recall_explore, time_explore_us});
+        }
+
+        log("\nTest Queries:\n");
+        for (const auto& r : test_results)
+        {
+            log("%3.0f%% \t recall %.5f \t time_us_per_query %6.0fus\n", r.pct * 100.0f, r.recall, r.time_us);
+        }
+
+        log("\nExploration Queries:\n");
+        for (const auto& r : explore_results)
+        {
+            log("%3.0f%% \t recall %.5f \t time_us_per_query %6.0fus\n", r.pct * 100.0f, r.recall, r.time_us);
         }
     }
 
